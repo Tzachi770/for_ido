@@ -1,0 +1,180 @@
+import pandas as pd
+from pypfopt import EfficientFrontier
+from pypfopt import risk_models
+from pypfopt import expected_returns
+import datetime
+from pandas_datareader import data
+import numpy as np
+import scipy.optimize as solver
+import matplotlib.pyplot as plt
+from pypfopt.discrete_allocation import DiscreteAllocation, get_latest_prices
+from scipy.stats import norm
+
+import_time_start = datetime.datetime.now()
+assets = ['SPY','AAPL','UBS','KO','TSLA','JPM','AAL','BAC','GE','GM','SAP','MSFT','NFLX','BP','PK','LKQ','QSR','TEVA','FL','MCD','XLE','BRK-B','COTY','USB']
+#assets = ['BRK-B']
+#assets = ['COTY','UBS','GE','AAL','KO']
+#assets= ['KO','PK','LKQ','TEVA','MCD','XLE','BRK-B','COTY','USB']
+#assets = ['SPY','MRNA','MCD','PK','COTY','BRK-B','GILD','MSFT']
+#assets = ['PK','MCD','BRK-B']
+
+
+
+start = datetime.datetime(2017,1,1)
+end = datetime.datetime.today()
+
+
+df = data.DataReader(assets,'yahoo',start=start,end=end)['Adj Close']
+
+for stock in assets:
+    df.loc[df[stock]=='NaN',stock]=np.nan # locate where i have ? and change it to nan
+    df.dropna(axis=0,inplace=True)
+
+
+log_return = expected_returns.log_returns_from_prices(df)
+average_log_return = log_return.mean()
+#print(average_log_return)
+annual_return = ((1+average_log_return)**252 -1)
+print(df)
+
+import_time_end = datetime.datetime.now()
+print(import_time_end-import_time_start)
+#print(annual_return)
+cov_mat = log_return.cov()
+annually_cov = cov_mat * 252
+#print(annually_cov)
+
+
+
+starting_point = datetime.datetime.now()
+
+
+n = 200000
+pfolio_returns_daily = []
+pfolio_volatility_daily = []
+all_weights = np.zeros((n,len(assets)))
+sharpe_ratio = np.zeros(n)
+pfolio_returns_annual = []
+pfolio_volatility_annual = []
+
+
+
+for x in range(n):
+    weights = np.random.rand(len(assets))
+    weights /= np.sum(weights)
+    all_weights[x, :] = weights
+    pfolio_returns_daily.append(np.sum(weights*average_log_return))
+    pfolio_volatility_daily.append(np.sqrt(np.dot(weights.T, np.dot(cov_mat, weights))))
+    pfolio_volatility_annual.append(np.sqrt(np.dot(weights.T, np.dot(annually_cov, weights))))
+
+
+
+
+pfolio_returns_daily = np.array(pfolio_returns_daily)
+pfolio_volatility_daily = np.array(pfolio_volatility_daily)
+pfolio_volatility_annual = np.array(pfolio_volatility_annual)
+pfolio_returns_annual = (((pfolio_returns_daily +1)**252)-1)
+print(pfolio_returns_annual)
+print(pfolio_volatility_annual)
+
+for x in range(n):
+    sharpe_ratio[x] = pfolio_returns_annual[x]/pfolio_volatility_annual[x]
+
+#creating dataframe of volatility and return
+portfolios = pd.DataFrame({'return': pfolio_returns_annual,'volatility': pfolio_volatility_annual})
+
+#max sharpe data:
+print(f'max sharpe ratio {sharpe_ratio.max()}')
+print(f'max sharpe ratio location {sharpe_ratio.argmax()}')
+max_sharpe_location = sharpe_ratio.argmax()
+max_sharpe_return =portfolios['return'][max_sharpe_location]
+max_sharpe_risk = portfolios['volatility'][max_sharpe_location]
+print(max_sharpe_location)
+
+#max sharpe weights:
+max_sharpe_weights = all_weights[max_sharpe_location,:]
+print(f'max sharpe ratio weights: {max_sharpe_weights}')
+
+
+
+
+'''
+
+#min risk:
+print(f'min risk lacation: {pfolio_volatility_annual.argmin()}')
+print(f'min std: {pfolio_volatility_annual.min()}')
+min_var_location = pfolio_volatility_annual.argmin()
+portfolio_expected_return = portfolios['return'][min_var_location]
+print('min risk portfolio expected return:',portfolio_expected_return)
+#min risk weights:
+min_var_weights = all_weights[min_var_location,:]
+print(f'the minimum sd weights:{min_var_weights}')
+
+
+#rounding the portfolio:(min risk portfolio)
+
+last_stock_price = get_latest_prices(df)
+last_stock_price = np.array(last_stock_price,'float')
+
+money_for_each_stock = min_var_weights * portfolio_investment
+no_of_stocks = money_for_each_stock/last_stock_price
+no_of_stocks = np.array(no_of_stocks,'int')
+'''
+
+#max sharpe:
+portfolio_investment = 6000
+last_stock_price = get_latest_prices(df)
+last_stock_price = np.array(last_stock_price,'float')
+money_each_stock_sharpe = max_sharpe_weights*portfolio_investment
+#print(money_each_stock_sharpe) not neccesery
+no_stock_sharpe = money_each_stock_sharpe/last_stock_price
+no_stock_sharpe = np.array(no_stock_sharpe,'int')
+commision_for_many = 0.009
+commision_min_deal = 1.4
+min_div_many = np.array(commision_min_deal/commision_for_many,'float')
+no_stock_sharpe = no_stock_sharpe.tolist()
+
+
+for x in no_stock_sharpe:
+    tot_com_for_stock = []
+    for n in tot_com_for_stock:
+        if x > min_div_many:
+            n = x*commision_for_many
+        elif x == 0:
+            n = 0
+        else:
+            n = commision_min_deal
+            
+
+
+money_each_stock_sharpe_rounding = no_stock_sharpe*last_stock_price
+if sum(money_each_stock_sharpe_rounding)> portfolio_investment:
+    print(f'you are over {sum(money_each_stock_sharpe_rounding)-portfolio_investment}$ from your maximum')
+
+else:
+    print(f'you got {portfolio_investment-sum(money_each_stock_sharpe_rounding)}')
+
+
+
+weights_round_sharpe = money_each_stock_sharpe_rounding/portfolio_investment
+weights_sum_sharpe = sum(weights_round_sharpe)
+print(weights_sum_sharpe)
+
+
+assets_weights_sharpe = pd.DataFrame({'assets': assets, 'weights': weights_round_sharpe , 'number of shares':no_stock_sharpe,'investment per asset':money_each_stock_sharpe_rounding})#,'commision':tot_com_for_stock})
+print(assets_weights_sharpe)
+print(sum(money_each_stock_sharpe_rounding))
+
+
+risk_round_sharpe = np.sqrt(np.dot(weights_round_sharpe.T,np.dot(annually_cov,weights_round_sharpe)))
+expected_re_sharpe = np.dot(weights_round_sharpe,annual_return)
+print(f'risk after rounding: {risk_round_sharpe}')
+print(f'expected return sharpe after rounding: {expected_re_sharpe}')
+rf = 0.0025
+print(f'sharpe ratio: {(expected_re_sharpe-rf)/risk_round_sharpe}')
+#print(f'sum of the commisions: {sum(tot_com_for_stock)}')
+#print(f'money after commisions and buying stocks: {portfolio_investment-sum(tot_com_for_stock)-sum(money_each_stock_sharpe_rounding)}')
+
+end_point = datetime.datetime.now()
+
+print(f"all calc time {end_point-starting_point}")
